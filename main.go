@@ -51,7 +51,7 @@ func main() {
 				log.Fatal("error converting version")
 			}
 		}
-		log.Printf("%x.%x.%x", version.Major, version.Minor, version.Patch)
+		log.Printf("Current tag is: %x.%x.%x", version.Major, version.Minor, version.Patch)
 	} else {
 		log.Fatalf("match: %v,  %v", match, tag)
 	}
@@ -70,16 +70,13 @@ func main() {
 		version.Patch++
 	}
 	newtag := strconv.Itoa(version.Major)+"."+strconv.Itoa(version.Minor)+"."+strconv.Itoa(version.Patch)
-	println(newtag)
-
-	println(github.Stringify(release.TargetCommitish))
+	log.Printf("New Tag will be %v", newtag)
 
 	pr, _ , err := client.PullRequests.Get(ctx, org, repo, 1)
 	if err != nil {
 		log.Fatalf("Getting PR failed: \n %v",err)
 	}
-	println(github.Stringify(pr))
-
+	log.Printf("%v", github.Stringify(pr.MergeCommitSHA))
 }
 
 func GitHubSetup() (context.Context, *github.Client) {
