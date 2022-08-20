@@ -53,7 +53,7 @@ func main() {
 		}
 		log.Printf("Current tag is: %x.%x.%x", version.Major, version.Minor, version.Patch)
 	} else {
-		log.Fatal("match: %v,  %v", match, tag)
+		log.Fatalf("match: %v,  %v", match, tag)
 	}
 
 	prTitle := os.Getenv("BUILD_SOURCEVERSIONMESSAGE")
@@ -71,7 +71,6 @@ func main() {
 	}
 	newtag := strconv.Itoa(version.Major)+"."+strconv.Itoa(version.Minor)+"."+strconv.Itoa(version.Patch)
 	log.Printf("New Tag will be %v", newtag)
-
 
 	pr, _ , err := client.PullRequests.Get(ctx, org, repo, 1)
 	if err != nil {
