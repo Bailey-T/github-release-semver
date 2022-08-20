@@ -16,7 +16,7 @@ type Semver struct {
 	Major, Minor, Patch int
 }
 
-var repo = "lector"
+var repo = "github-release-semver"
 var org = "drtbz"
 var version Semver
 
@@ -77,9 +77,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Getting PR failed: \n %v",err)
 	}
-	log.Printf("%v", github.Stringify(release.TargetCommitish))
-
-	log.Printf("%v", github.Stringify(pr))
+	log.Printf("%v", github.Stringify(pr.MergeCommitSHA))
 }
 
 func GitHubSetup() (context.Context, *github.Client) {
