@@ -34,19 +34,48 @@ func main() {
 		log.Fatalf("Getting PR failed: \n %v", err)
 	}
 
-	newTag, err := TagFromPRTitle(github.Stringify(pr.Title), ver)
+	newTagName, err := TagFromPRTitle(github.Stringify(pr.Title), ver)
 	if err != nil {
 		log.Fatalf("Getting new tag failed: \n %v", err)
 	}
 	
-	commitish := github.Stringify(pr.Head.Ref)
+	tagType := "commit"
+	newTagOpts := &github.Tag{
+		Tag: &newTagName,
+		SHA: pr.Base.SHA,
+		Message: pr.Title,
+		Object: &github.GitObject{
+			SHA: pr.Base.SHA,
+			Type: &tagType,
+		},
+	}
+	newTag, resp, err := client.Git.CreateTag(ctx, org, repo, newTagOpts)
+	log.Printf("Create tag response: %v", resp.Body)
+	if err != nil {
+		log.Fatalf("Creating tag failed \n %v", err)
+	}
+
+	refName := "refs/tags/"+newTagName
+	refOpts := github.Reference{
+		Ref: &refName,
+		Object: newTag.Object,
+	}
+	ref, resp, err := client.Git.CreateRef(ctx, org, repo, &refOpts)
+	log.Printf("Create Reference response: %v", resp.Body)
+	log.Printf("Reference: %v", ref.Ref)
+	if err != nil {
+		log.Fatalf("Creating ref failed \n %v", err)
+	}
+	commitish := github.Stringify(pr.Base.Ref)
+	log.Printf("TargetCommitish: %v", commitish)
 	newReleaseOpts := &github.RepositoryRelease{
-		TagName: &newTag,
-		Name: &newTag,
+		TagName: &newTagName,
+		Name: &newTagName,
 		TargetCommitish: &commitish,
+		Body: newTag.Message,
 	}
 	newRelease, resp, err := client.Repositories.CreateRelease(ctx, org, repo, newReleaseOpts)
-
+	
 	if newRelease == nil {
 		log.Printf("response: %v", resp.Body)
 	}
