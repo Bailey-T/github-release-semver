@@ -5,79 +5,55 @@ import (
 	"log"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/google/go-github/v45/github"
 	"golang.org/x/oauth2"
 )
 
-type Semver struct {
-	Major, Minor, Patch int
-}
-
+// Testing Vars
 var repo = "github-release-semver"
 var org = "drtbz"
-var version Semver
-
-//var uri = "https://api.github.com/repos/"+org+"/"+repo+"/releases"
+var pullID = 1
+var ver Semver = &Version{Major: 0, Minor: 0, Patch: 0}
 
 func main() {
 	ctx, client := GitHubSetup()
-	release, _, err := LatestRelease(client, ctx, org, repo)
+	release, _, err := client.Repositories.GetLatestRelease(ctx, org, repo)
 	if err != nil {
 		log.Panicf("something went wrong grabbing release: \n %v", err)
 	}
-	tag := removeOuterQuotes(strings.Replace(strings.ToLower(github.Stringify(release.TagName)), "v", ``, 1))
-	re, err := regexp.Compile(`^[\d\.]+$`)
+
+	_, err = SplitAndConvert(ver, release.TagName)
 	if err != nil {
-		log.Panicf("Something went wrong with regex: \n %v", err)
+		log.Fatalf("Getting PR failed: \n %v", err)
 	}
-
-	// Split and convert the tag
-	if match := re.MatchString(tag); match {
-		log.Printf("match: %v,  %v", match, tag)
-		split := strings.Split(tag, ".")
-		for k, v := range split {
-			switch k {
-			case 0:
-				version.Major, err = strconv.Atoi(v)
-			case 1:
-				version.Minor, err = strconv.Atoi(v)
-			case 2:
-				version.Patch, err = strconv.Atoi(v)
-			}
-			if err != nil {
-				log.Fatal("error converting version")
-			}
-		}
-		log.Printf("Current tag is: %x.%x.%x", version.Major, version.Minor, version.Patch)
-	} else {
-		log.Fatal("match: %v,  %v", match, tag)
-	}
-
-	prTitle := os.Getenv("BUILD_SOURCEVERSIONMESSAGE")
-	if match, _ := regexp.MatchString(`^#major`, prTitle); match {
-		version.Major++
-		version.Minor = 0
-		version.Patch = 0
-	}
-	if match, _ := regexp.MatchString(`^#minor`, prTitle); match {
-		version.Minor++
-		version.Patch = 0
-	}
-	if match, _ := regexp.MatchString(`^#patch`, prTitle); match {
-		version.Patch++
-	}
-	newtag := strconv.Itoa(version.Major)+"."+strconv.Itoa(version.Minor)+"."+strconv.Itoa(version.Patch)
-	log.Printf("New Tag will be %v", newtag)
-
-
-	pr, _ , err := client.PullRequests.Get(ctx, org, repo, 1)
+	// Grab the pull request
+	pr, _, err := client.PullRequests.Get(ctx, org, repo, pullID)
 	if err != nil {
-		log.Fatalf("Getting PR failed: \n %v",err)
+		log.Fatalf("Getting PR failed: \n %v", err)
 	}
-	log.Printf("%v", github.Stringify(pr.MergeCommitSHA))
+
+	newTag, err := TagFromPRTitle(github.Stringify(pr.Title), ver)
+	if err != nil {
+		log.Fatalf("Getting new tag failed: \n %v", err)
+	}
+	
+	commitish := github.Stringify(pr.Head.Ref)
+	newReleaseOpts := &github.RepositoryRelease{
+		TagName: &newTag,
+		Name: &newTag,
+		TargetCommitish: &commitish,
+	}
+	newRelease, resp, err := client.Repositories.CreateRelease(ctx, org, repo, newReleaseOpts)
+
+	if newRelease == nil {
+		log.Printf("response: %v", resp.Body)
+	}
+	if err != nil {
+		log.Fatalf("Creating release failed \n %v", err)
+	}
+
 }
 
 func GitHubSetup() (context.Context, *github.Client) {
@@ -97,11 +73,64 @@ func GitHubSetup() (context.Context, *github.Client) {
 	return ctx, client
 }
 
-func LatestRelease(client *github.Client, ctx context.Context, owner, repo string) (release *github.RepositoryRelease, resp *github.Response, err error) {
-	release, resp, err = client.Repositories.GetLatestRelease(ctx, owner, repo)
+func removeOuterQuotes(s string) string {
+	return regexp.MustCompile(`^"(.*)"$`).ReplaceAllString(s, `$1`)
+}
+
+func SplitAndConvert(ver Semver, tagName *string) (s string, err error) {
+	t := removeOuterQuotes(strings.Replace(strings.ToLower(*tagName), "v", ``, 1))
+	re, err := regexp.Compile(`^[\d\.]+$`)
+	if err != nil {
+		log.Panicf("Something went wrong with regex: \n %v", err)
+	}
+	// Split and convert the tag as long as it matches the format v#.#.#
+	if match := re.MatchString(t); match {
+		split := strings.Split(t, ".")
+		for k, v := range split {
+			switch k {
+			case 0:
+				ver.SetMajor(v)
+			case 1:
+				ver.SetMinor(v)
+			case 2:
+				ver.SetPatch(v)
+			}
+			if err != nil {
+				log.Fatal("error converting version")
+			}
+		}
+		s = ver.ToString()
+		log.Printf("Current tag is: %v", s)
+	} else {
+		log.Fatalf("match: %v,  %v", match, t)
+	}
 	return
 }
 
-func removeOuterQuotes(s string) string {
-	return regexp.MustCompile(`^"(.*)"$`).ReplaceAllString(s, `$1`)
+func TagFromPRTitle(n string, v Semver) (s string, err error) {
+	prTitle := removeOuterQuotes(strings.ToLower(n))
+	if match, err := regexp.MatchString(`^#major`, prTitle); match {
+		if err != nil {
+			log.Println("Couldnt Match on Major PR Tag")
+		}
+		log.Printf("Matched Major PR Tag on commit msg: %v", prTitle)
+		ver.IncrementMajor()
+	}
+	if match, err := regexp.MatchString(`^#minor`, prTitle); match {
+		if err != nil {
+			log.Println("Couldnt Match on Minor PR Tag")
+		}
+		log.Printf("Matched Minor PR Tag on commit msg: %v", prTitle)
+		ver.IncrementMinor()
+	}
+	if match, err := regexp.MatchString(`^#patch`, prTitle); match {
+		if err != nil {
+			log.Println("Couldnt Match on Patch PR Tag")
+		}
+		log.Printf("Matched Patch PR Tag on commit msg: %v", prTitle)
+		ver.IncrementPatch()
+	}
+	s = v.ToString()
+	log.Printf("New Tag will be %v", s)
+	return
 }
