@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/go-github/v45/github"
 	"golang.org/x/oauth2"
+	"github.com/drtbz/release-semver/version"
 )
 
 func main() {
@@ -77,14 +78,14 @@ func removeOuterQuotes(s string) string {
 	return regexp.MustCompile(`^"(.*)"$`).ReplaceAllString(s, `$1`)
 }
 
-func SplitAndConvert(tagName *string) (ver Semver, s string, err error) {
+func SplitAndConvert(tagName *string) (ver version.Semver, s string, err error) {
 	t := removeOuterQuotes(strings.Replace(strings.ToLower(*tagName), "v", ``, 1))
 	re, err := regexp.Compile(`^[\d\.]+$`)
 	if err != nil {
 		log.Panicf("Something went wrong with regex: \n %v", err)
 	}
 	// Split and convert the tag as long as it matches the format v#.#.#
-	ver = &Version{Major: 0, Minor: 0, Patch: 0}
+	ver = &version.Version{Major: 0, Minor: 0, Patch: 0}
 	if match := re.MatchString(t); match {
 		split := strings.Split(t, ".")
 		for k, v := range split {
@@ -108,7 +109,7 @@ func SplitAndConvert(tagName *string) (ver Semver, s string, err error) {
 	return
 }
 
-func TagFromPRTitle(n string, v Semver) (s string, err error) {
+func TagFromPRTitle(n string, v version.Semver) (s string, err error) {
 	prTitle := removeOuterQuotes(strings.ToLower(n))
 	if match, err := regexp.MatchString(`^#major`, prTitle); match {
 		if err != nil {
