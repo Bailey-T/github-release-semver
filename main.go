@@ -11,20 +11,23 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// Testing Vars
-var repo = "github-release-semver"
-var org = "drtbz"
-var pullID = 1
-var ver Semver = &Version{Major: 0, Minor: 0, Patch: 0}
-
 func main() {
-	ctx, client := GitHubSetup()
+	var repo = os.Args[1]
+	var org = os.Args[2]
+	var pullID = 1
+
+	token, tkex := os.LookupEnv("GHTOKEN")
+	if !tkex {
+		log.Fatal("Couldn't get token from ENV")
+	}
+	ctx, client := GitHubPATSetup(token)
+
 	release, _, err := client.Repositories.GetLatestRelease(ctx, org, repo)
 	if err != nil {
 		log.Panicf("something went wrong grabbing release: \n %v", err)
 	}
 
-	_, err = SplitAndConvert(ver, release.TagName)
+	ver, _, err := SplitAndConvert(release.TagName)
 	if err != nil {
 		log.Fatalf("Getting PR failed: \n %v", err)
 	}
@@ -38,44 +41,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("Getting new tag failed: \n %v", err)
 	}
-	
-	tagType := "commit"
-	newTagOpts := &github.Tag{
-		Tag: &newTagName,
-		SHA: pr.Base.SHA,
-		Message: pr.Title,
-		Object: &github.GitObject{
-			SHA: pr.Base.SHA,
-			Type: &tagType,
-		},
-	}
-	newTag, resp, err := client.Git.CreateTag(ctx, org, repo, newTagOpts)
-	log.Printf("Create tag response: %v", resp.Body)
-	if err != nil {
-		log.Fatalf("Creating tag failed \n %v", err)
-	}
 
-	refName := "refs/tags/"+newTagName
-	refOpts := github.Reference{
-		Ref: &refName,
-		Object: newTag.Object,
-	}
-	ref, resp, err := client.Git.CreateRef(ctx, org, repo, &refOpts)
-	log.Printf("Create Reference response: %v", resp.Body)
-	log.Printf("Reference: %v", ref.Ref)
-	if err != nil {
-		log.Fatalf("Creating ref failed \n %v", err)
-	}
-	commitish := github.Stringify(pr.Base.Ref)
+	commitish := "main"
 	log.Printf("TargetCommitish: %v", commitish)
 	newReleaseOpts := &github.RepositoryRelease{
-		TagName: &newTagName,
-		Name: &newTagName,
+		TagName:         &newTagName,
+		Name:            &newTagName,
 		TargetCommitish: &commitish,
-		Body: newTag.Message,
+		//Body: newTag.Message,
 	}
 	newRelease, resp, err := client.Repositories.CreateRelease(ctx, org, repo, newReleaseOpts)
-	
+
 	if newRelease == nil {
 		log.Printf("response: %v", resp.Body)
 	}
@@ -85,16 +61,11 @@ func main() {
 
 }
 
-func GitHubSetup() (context.Context, *github.Client) {
-	token, tkex := os.LookupEnv("GHTOKEN")
-
-	if !tkex {
-		log.Fatal("Couldn't get token from ENV")
-	}
-
+// Sets up a GitHub Client using a PAT
+func GitHubPATSetup(pat string) (context.Context, *github.Client) {
 	ctx := context.Background()
 	ts := oauth2.StaticTokenSource(
-		&oauth2.Token{AccessToken: token},
+		&oauth2.Token{AccessToken: pat},
 	)
 	tc := oauth2.NewClient(ctx, ts)
 
@@ -106,13 +77,14 @@ func removeOuterQuotes(s string) string {
 	return regexp.MustCompile(`^"(.*)"$`).ReplaceAllString(s, `$1`)
 }
 
-func SplitAndConvert(ver Semver, tagName *string) (s string, err error) {
+func SplitAndConvert(tagName *string) (ver Semver, s string, err error) {
 	t := removeOuterQuotes(strings.Replace(strings.ToLower(*tagName), "v", ``, 1))
 	re, err := regexp.Compile(`^[\d\.]+$`)
 	if err != nil {
 		log.Panicf("Something went wrong with regex: \n %v", err)
 	}
 	// Split and convert the tag as long as it matches the format v#.#.#
+	ver = &Version{Major: 0, Minor: 0, Patch: 0}
 	if match := re.MatchString(t); match {
 		split := strings.Split(t, ".")
 		for k, v := range split {
@@ -143,21 +115,21 @@ func TagFromPRTitle(n string, v Semver) (s string, err error) {
 			log.Println("Couldnt Match on Major PR Tag")
 		}
 		log.Printf("Matched Major PR Tag on commit msg: %v", prTitle)
-		ver.IncrementMajor()
+		v.IncrementMajor()
 	}
 	if match, err := regexp.MatchString(`^#minor`, prTitle); match {
 		if err != nil {
 			log.Println("Couldnt Match on Minor PR Tag")
 		}
 		log.Printf("Matched Minor PR Tag on commit msg: %v", prTitle)
-		ver.IncrementMinor()
+		v.IncrementMinor()
 	}
 	if match, err := regexp.MatchString(`^#patch`, prTitle); match {
 		if err != nil {
 			log.Println("Couldnt Match on Patch PR Tag")
 		}
 		log.Printf("Matched Patch PR Tag on commit msg: %v", prTitle)
-		ver.IncrementPatch()
+		v.IncrementPatch()
 	}
 	s = v.ToString()
 	log.Printf("New Tag will be %v", s)
